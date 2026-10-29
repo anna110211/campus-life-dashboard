@@ -14,7 +14,6 @@ import os
 # ==========================================
 st.set_page_config(page_title="캠퍼스 생활 설문 대시보드", page_icon="🎓", layout="wide")
 
-# 한글 폰트 설정
 font_path = "NanumGothic.ttf"
 if os.path.exists(font_path):
     font_prop = fm.FontProperties(fname=font_path)
@@ -30,7 +29,7 @@ plt.rc('axes', unicode_minus=False)
 def find_col(df, keywords):
     for col in df.columns:
         for kw in keywords:
-            if kw in col.replace(" ", ""):
+            if kw in str(col).replace(" ", ""):
                 return col
     return None
 
@@ -52,10 +51,10 @@ elif os.path.exists("campus_life.csv"):
     raw_df = pd.read_csv("campus_life.csv")
 
 if raw_df is None:
-    st.info("👆 분석을 시작하려면 CSV 파일을 업로드해 주세요.")
+    st.info("분석을 시작하려면 설문 결과 CSV 파일을 업로드해 주세요.")
     st.stop()
 
-# ⭐️ 여기서 opinion_col을 포함한 모든 컬럼을 먼저 안전하게 찾습니다!
+# 컬럼 자동 매핑
 dept_col = find_col(raw_df, ['학과', '전공', '학부'])
 study_col = find_col(raw_df, ['공부시간', '학습시간', '공부'])
 sleep_col = find_col(raw_df, ['수면시간', '수면'])
@@ -82,7 +81,6 @@ clean_df = df[valid_condition].copy()
 valid_rows = len(clean_df)
 excluded_rows = total_rows - valid_rows
 
-# 정보 표시
 col_info1, col_info2, col_info3 = st.columns(3)
 col_info1.metric("총 응답 수", f"{total_rows:,} 건")
 col_info2.metric("정상 분석 데이터", f"{valid_rows:,} 건")
@@ -107,7 +105,6 @@ if selected_dept == "전체 학과" or not dept_col:
 else:
     filtered_df = clean_df[clean_df[dept_col] == selected_dept]
 
-# 핵심 요약 지표
 m_col1, m_col2, m_col3, m_col4 = st.columns(4)
 avg_satis = filtered_df[satis_col].mean() if satis_col else 0
 avg_study = filtered_df[study_col].mean() if study_col else 0
@@ -121,7 +118,7 @@ m_col4.metric("📱 평균 스마트폰 시간", f"{avg_phone:.1f} 시간")
 
 st.divider()
 
-# [3] 시각화 1: 학과별 생활 습관 막대그래프
+# [3] 학과별 생활 습관 막대그래프
 st.subheader("📊 3. 학과별 학생들의 생활 습관 비교")
 habit_cols = [c for c in [study_col, sleep_col, phone_col] if c]
 if dept_col and habit_cols:
@@ -137,7 +134,7 @@ if dept_col and habit_cols:
 else:
     st.info("학과 또는 생활 습관 관련 데이터 컬럼을 찾을 수 없습니다.")
 
-# [4] 시각화 2: 만족도 상관관계 히트맵
+# [4] 만족도 상관관계 히트맵
 st.subheader("🔥 4. 생활 습관과 학교생활 만족도 간의 관련성 (히트맵)")
 corr_target_cols = [c for c in [study_col, sleep_col, phone_col, satis_col] if c]
 if len(corr_target_cols) >= 2:
@@ -149,23 +146,7 @@ if len(corr_target_cols) >= 2:
 else:
     st.info("상관관계를 계산할 수치형 데이터가 부족합니다.")
 
-# [5] 시각화 3: 워드클라우드
+# [5] 워드클라우드
 st.subheader("☁️ 5. 학생 한 줄 의견 키워드 분석 (워드 클라우드)")
 if opinion_col and opinion_col in filtered_df.columns and not filtered_df[opinion_col].dropna().empty:
-    all_text = " ".join(filtered_df[opinion_col].dropna().astype(str).tolist())
-    words = re.findall(r'[가-힣a-zA-Z]{2,}', all_text)
-    processed_text = " ".join(words)
-    
-    if processed_text.strip():
-        wc = WordCloud(
-            font_path=font_path if os.path.exists(font_path) else None,
-            background_color="white", width=800, height=350, max_words=80, colormap="viridis"
-        ).generate(processed_text)
-        fig3, ax3 = plt.subplots(figsize=(10, 4.5))
-        ax3.imshow(wc, interpolation="bilinear")
-        ax3.axis("off")
-        st.pyplot(fig3)
-    else:
-        st.info("워드클라우드를 생성할 유효한 텍스트가 부족합니다.")
-else:
-    st.info("
+    all_text = " ".join(filtered_df
