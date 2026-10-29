@@ -1,135 +1,171 @@
-import os
-import re
-import matplotlib.font_manager as fm
-import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import seaborn as sns
 import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.font_manager as fm
+import seaborn as sns
 from wordcloud import WordCloud
+import collections
+import re
+import os
 
 # ==========================================
 # 0. 페이지 기본 설정 및 한글 폰트 지정
 # ==========================================
 st.set_page_config(page_title="캠퍼스 생활 설문 대시보드", page_icon="🎓", layout="wide")
 
-# 한글 폰트 설정 (제공된 NanumGothic.ttf 우선 적용)
+# 한글 폰트 설정
 font_path = "NanumGothic.ttf"
 if os.path.exists(font_path):
-  font_prop = fm.FontProperties(fname=font_path)
-  font_name = font_prop.get_name()
-  plt.rc("font", family=font_name)
+    font_prop = fm.FontProperties(fname=font_path)
+    font_name = font_prop.get_name()
+    plt.rc('font', family=font_name)
 else:
-  # 기본 OS별 대체 폰트 설정
-  plt.rc("font", family="Malgun Gothic" if os.name == "nt" else "AppleGothic")
-plt.rc("axes", unicode_minus=False)  # 마이너스 기호 깨짐 방지
-
+    plt.rc('font', family='Malgun Gothic' if os.name == 'nt' else 'AppleGothic')
+plt.rc('axes', unicode_minus=False)
 
 # ==========================================
 # 1. 컬럼 매핑 유틸리티 함수
 # ==========================================
 def find_col(df, keywords):
-  """컬럼명에 특정 키워드가 포함되어 있는지 찾아 실제 컬럼명을 반환합니다."""
-  for col in df.columns:
-    for kw in keywords:
-      if kw in col.replace(" ", ""):
-        return col
-  return None
-
+    for col in df.columns:
+        for kw in keywords:
+            if kw in col.replace(" ", ""):
+                return col
+    return None
 
 # ==========================================
-# 2. 메인 웹 인터페이스 (위에서 아래 순서)
+# 2. 메인 웹 인터페이스
 # ==========================================
-
-# [1] 헤더 영역
 st.title("🎓 캠퍼스 생활 설문 결과 대시보드")
-st.markdown(
-    "학생회 데이터 담당자가 제공하는 **재학생 캠퍼스 생활 습관 및 만족도"
-    " 분석** 페이지입니다."
-)
+st.markdown("학생회 데이터 담당자가 제공하는 **재학생 캠퍼스 생활 습관 및 만족도 분석** 페이지입니다.")
 st.divider()
 
-# [2] CSV 파일 업로드 및 데이터 정제/미리보기 섹션
+# [1] 파일 업로드
 st.subheader("📁 1. 설문 데이터 업로드 및 검증")
-
-# 파일 업로드 위젯 (로컬에 campus_life.csv가 있으면 기본 자동 불러오기 지원)
-uploaded_file = st.file_uploader(
-    "설문 결과 CSV 파일(campus_life.csv)을 업로드하세요.", type=["csv"]
-)
+uploaded_file = st.file_uploader("설문 결과 CSV 파일(campus_life.csv)을 업로드하세요.", type=["csv"])
 
 raw_df = None
 if uploaded_file is not None:
-  raw_df = pd.read_csv(uploaded_file)
+    raw_df = pd.read_csv(uploaded_file)
 elif os.path.exists("campus_life.csv"):
-  raw_df = pd.read_csv("campus_life.csv")
+    raw_df = pd.read_csv("campus_life.csv")
 
 if raw_df is None:
-  st.info("👆 분석을 시작하려면 CSV 파일을 업로드해 주세요.")
-  st.stop()
+    st.info("👆 분석을 시작하려면 CSV 파일을 업로드해 주세요.")
+    st.stop()
 
-import collections
-import matplotlib.pyplot as plt
+# ⭐️ 여기서 opinion_col을 포함한 모든 컬럼을 먼저 안전하게 찾습니다!
+dept_col = find_col(raw_df, ['학과', '전공', '학부'])
+study_col = find_col(raw_df, ['공부시간', '학습시간', '공부'])
+sleep_col = find_col(raw_df, ['수면시간', '수면'])
+phone_col = find_col(raw_df, ['스마트폰', '폰사용', '스마트폰사용시간'])
+satis_col = find_col(raw_df, ['만족도', '학교생활만족도'])
+opinion_col = find_col(raw_df, ['의견', '한줄의견', '한줄', '소감', '코멘트'])
 
-# ==========================================
-# 추가 시각화: 한 줄 의견 심층 분석 (Top 10 및 긍/부정 분석)
-# ==========================================
+# 데이터 정제
+total_rows = len(raw_df)
+df = raw_df.copy()
+
+num_cols = [c for c in [study_col, sleep_col, phone_col, satis_col] if c]
+for c in num_cols:
+    df[c] = pd.to_numeric(df[c], errors='coerce')
+
+valid_condition = pd.Series(True, index=df.index)
+if dept_col: valid_condition &= df[dept_col].notnull()
+if satis_col: valid_condition &= df[satis_col].notnull() & (df[satis_col] >= 0)
+if study_col: valid_condition &= (df[study_col] >= 0) & (df[study_col] <= 24)
+if sleep_col: valid_condition &= (df[sleep_col] >= 0) & (df[sleep_col] <= 24)
+if phone_col: valid_condition &= (df[phone_col] >= 0) & (df[phone_col] <= 24)
+
+clean_df = df[valid_condition].copy()
+valid_rows = len(clean_df)
+excluded_rows = total_rows - valid_rows
+
+# 정보 표시
+col_info1, col_info2, col_info3 = st.columns(3)
+col_info1.metric("총 응답 수", f"{total_rows:,} 건")
+col_info2.metric("정상 분석 데이터", f"{valid_rows:,} 건")
+col_info3.metric("잘못된 데이터 제외 건수", f"{excluded_rows:,} 건", delta=f"-{excluded_rows} 건", delta_color="inverse")
+
+with st.expander("🔍 정제된 데이터 미리보기 (상위 5건)"):
+    st.dataframe(clean_df.head(), use_container_width=True)
+
 st.divider()
-st.subheader("💡 6. 한 줄 의견 심층 키워드 분석")
 
-if opinion_col and not filtered_df[opinion_col].dropna().empty:
-  # 텍스트 병합 및 단어 추출 (2글자 이상)
-  all_text_for_analysis = " ".join(filtered_df[opinion_col].dropna().astype(str).tolist())
-  extracted_words = re.findall(r'[가-힣]{2,}', all_text_for_analysis)
-
-  # 1. 긍정/부정 단어 사전 정의 및 카운팅
-  pos_keywords = ['좋다', '만족', '최고', '유익', '편리', '좋음', '쾌적', '재밌', '충분', '좋은']
-  neg_keywords = ['아쉽', '부족', '불편', '불만', '최악', '힘들', '어렵', '비싸', '개선', '나쁨']
-
-  pos_count = sum(1 for word in extracted_words if any(p in word for p in pos_keywords))
-  neg_count = sum(1 for word in extracted_words if any(n in word for n in neg_keywords))
-
-  st.markdown(f"**[{selected_dept}] 학생들의 감성 분석 결과**")
-
-  # 메트릭 표시
-  emo_col1, emo_col2 = st.columns(2)
-  emo_col1.metric(label="😊 긍정적 단어 등장 횟수", value=f"{pos_count} 회")
-  emo_col2.metric(label="😠 부정적 단어 등장 횟수", value=f"{neg_count} 회")
-
-  # 긍정/부정 파이 차트와 Top 10 막대그래프를 나란히 배치
-  col_chart1, col_chart2 = st.columns(2)
-
-  with col_chart1:
-    st.caption("긍정 vs 부정 단어 비율")
-    fig_emo, ax_emo = plt.subplots(figsize=(5, 5))
-    if pos_count == 0 and neg_count == 0:
-      ax_emo.text(0.5, 0.5, "감성 단어 매칭 결과 없음", ha='center', va='center')
-      ax_emo.axis('off')
-    else:
-      ax_emo.pie(
-        [pos_count, neg_count],
-        labels=['긍정', '부정'],
-        autopct='%1.1f%%',
-        colors=['#66b3ff', '#ff9999'],
-        startangle=90
-      )
-    st.pyplot(fig_emo)
-
-  with col_chart2:
-    st.caption("가장 자주 등장하는 단어 Top 10")
-    # 2. 키워드 빈도수 계산 (Top 10)
-    word_counts = collections.Counter(extracted_words)
-    top_10_words = word_counts.most_common(10)
-
-    if top_10_words:
-      words, counts = zip(*top_10_words)
-      fig_top10, ax_top10 = plt.subplots(figsize=(6, 5))
-
-      # 가로형 막대그래프
-      sns.barplot(x=list(counts), y=list(words), ax=ax_top10, palette="viridis")
-      ax_top10.set_xlabel("등장 횟수")
-      ax_top10.set_ylabel("키워드")
-      st.pyplot(fig_top10)
-    else:
-      st.info("추출할 단어가 충분하지 않습니다.")
+# [2] 학과 선택 필터
+st.subheader("🎯 2. 학과별 맞춤 분석 필터")
+if dept_col and dept_col in clean_df.columns:
+    departments = ["전체 학과"] + sorted(clean_df[dept_col].dropna().unique().tolist())
 else:
-  st.info("한 줄 의견 데이터를 분석할 수 없습니다.")
+    departments = ["전체 학과"]
+
+selected_dept = st.selectbox("확인하고자 하는 학과를 선택하세요:", options=departments, index=0)
+
+if selected_dept == "전체 학과" or not dept_col:
+    filtered_df = clean_df
+else:
+    filtered_df = clean_df[clean_df[dept_col] == selected_dept]
+
+# 핵심 요약 지표
+m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+avg_satis = filtered_df[satis_col].mean() if satis_col else 0
+avg_study = filtered_df[study_col].mean() if study_col else 0
+avg_sleep = filtered_df[sleep_col].mean() if sleep_col else 0
+avg_phone = filtered_df[phone_col].mean() if phone_col else 0
+
+m_col1.metric("⭐ 평균 학교생활 만족도", f"{avg_satis:.2f} 점")
+m_col2.metric("📖 평균 공부시간", f"{avg_study:.1f} 시간")
+m_col3.metric("💤 평균 수면시간", f"{avg_sleep:.1f} 시간")
+m_col4.metric("📱 평균 스마트폰 시간", f"{avg_phone:.1f} 시간")
+
+st.divider()
+
+# [3] 시각화 1: 학과별 생활 습관 막대그래프
+st.subheader("📊 3. 학과별 학생들의 생활 습관 비교")
+habit_cols = [c for c in [study_col, sleep_col, phone_col] if c]
+if dept_col and habit_cols:
+    dept_habit_mean = clean_df.groupby(dept_col)[habit_cols].mean()
+    fig1, ax1 = plt.subplots(figsize=(10, 5))
+    dept_habit_mean.plot(kind='bar', ax=ax1, width=0.7, colormap='Set2')
+    ax1.set_title("학과별 평균 생활 습관 비교", fontsize=14, pad=12)
+    ax1.set_xlabel("학과", fontsize=11)
+    ax1.set_ylabel("평균 시간 (시간)", fontsize=11)
+    ax1.set_xticklabels(ax1.get_xticklabels(), rotation=30, ha='right')
+    ax1.grid(axis='y', linestyle='--', alpha=0.5)
+    st.pyplot(fig1)
+else:
+    st.info("학과 또는 생활 습관 관련 데이터 컬럼을 찾을 수 없습니다.")
+
+# [4] 시각화 2: 만족도 상관관계 히트맵
+st.subheader("🔥 4. 생활 습관과 학교생활 만족도 간의 관련성 (히트맵)")
+corr_target_cols = [c for c in [study_col, sleep_col, phone_col, satis_col] if c]
+if len(corr_target_cols) >= 2:
+    corr_matrix = filtered_df[corr_target_cols].corr()
+    fig2, ax2 = plt.subplots(figsize=(7, 5))
+    sns.heatmap(corr_matrix, annot=True, fmt=".2f", cmap="coolwarm", vmin=-1, vmax=1, linewidths=0.8, ax=ax2)
+    ax2.set_title(f"[{selected_dept}] 상관관계 히트맵", fontsize=13, pad=12)
+    st.pyplot(fig2)
+else:
+    st.info("상관관계를 계산할 수치형 데이터가 부족합니다.")
+
+# [5] 시각화 3: 워드클라우드
+st.subheader("☁️ 5. 학생 한 줄 의견 키워드 분석 (워드 클라우드)")
+if opinion_col and opinion_col in filtered_df.columns and not filtered_df[opinion_col].dropna().empty:
+    all_text = " ".join(filtered_df[opinion_col].dropna().astype(str).tolist())
+    words = re.findall(r'[가-힣a-zA-Z]{2,}', all_text)
+    processed_text = " ".join(words)
+    
+    if processed_text.strip():
+        wc = WordCloud(
+            font_path=font_path if os.path.exists(font_path) else None,
+            background_color="white", width=800, height=350, max_words=80, colormap="viridis"
+        ).generate(processed_text)
+        fig3, ax3 = plt.subplots(figsize=(10, 4.5))
+        ax3.imshow(wc, interpolation="bilinear")
+        ax3.axis("off")
+        st.pyplot(fig3)
+    else:
+        st.info("워드클라우드를 생성할 유효한 텍스트가 부족합니다.")
+else:
+    st.info("
