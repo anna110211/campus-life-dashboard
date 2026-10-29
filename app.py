@@ -114,4 +114,4 @@ else:
 
 m_col1, m_col2, m_col3, m_col4 = st.columns(4)
 avg_satis = filtered_df[satis_col].mean() if satis_col else 0
-avg_study
+avg_study= df['study_hours'].mean()
